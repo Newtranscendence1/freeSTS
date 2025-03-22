@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>PeerJS 실시간 음성 전송</title>
+  <!-- PeerJS 라이브러리 (CDN) -->
+  <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .section { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; }
+    .section h2 { margin-top: 0; }
+    input, button { padding: 5px; margin: 5px; }
+  </style>
+</head>
+<body>
+  <!-- 호스트(채널 생성) 영역 -->
+  <div class="section" id="hostSection">
+    <h2>채널 만들기 (호스트)</h2>
+    <button id="createChannelBtn">채널 만들기</button>
+    <div id="hostInfo"></div>
+    <div id="hostCalls"></div>
+  </div>
+
+  <!-- 참여자(채널 연결) 영역 -->
+  <div class="section" id="joinSection">
+    <h2>채널 참여 (연결자)</h2>
+    <!-- 마이크 사용 권한 요청 버튼 -->
+    <button id="requestMicBtn">마이크 사용 권한 요청</button>
+    <span id="micStatus">마이크 권한 미획득</span>
+    <br>
+    <label for="hostIdInput">호스트 Peer ID:</label>
+    <input type="text" id="hostIdInput" placeholder="호스트 Peer ID">
+    <br>
+    <label for="passwordInput">연결 암호:</label>
+    <input type="text" id="passwordInput" placeholder="연결 암호">
+    <br>
+    <button id="joinChannelBtn">연결</button>
+    <div id="joinStatus"></div>
+  </div>
+
+  <script>
+    // --- 호스트(채널 생성) 부분 ---
+    let hostPeer = null;
+    let hostPassword = null;
+
+    document.getElementById('createChannelBtn').addEventListener('click', function() {
+      // Peer 인스턴스 생성 (호스트)
+      hostPeer = new Peer();
+      hostPeer.on('open', function(id) {
+        // 6자리 랜덤 문자열을 연결 암호로 생성
+        hostPassword = Math.random().toString(36).substring(2, 8);
+        document.getElementById('hostInfo').innerHTML =
+          '<p>채널이 생성되었습니다.</p>' +
+          '<p>Peer ID: <strong>' + id + '</strong></p>' +
+          '<p>연결 암호: <strong>' + hostPassword + '</strong></p>' +
+          '<p>이 정보를 참여자에게 전달하세요.</p>';
+      });
+
+      // 다른 참여자로부터의 연결 요청 처리
+      hostPeer.on('call', function(call) {
+        // 연결 요청 시 전달된 metadata에서 암호 확인
+        if (call.metadata && call.metadata.password === hostPassword) {
+          console.log('올바른 연결 암호입니다. 연결을 수락합니다.');
+          // 답변 시 미디어 스트림은 전송하지 않음 (호스트는 수신만 함)
+          call.answer();
+          // 참여자 쪽의 마이크 오디오 스트림 수신
+          call.on('stream', function(remoteStream) {
+            // 새로운 audio 엘리먼트를 만들어 스트림 재생
+            let audioElement = document.createElement('audio');
+            audioElement.srcObject = remoteStream;
+            audioElement.controls = true;
+            audioElement.autoplay = true;
+            document.getElementById('hostCalls').appendChild(audioElement);
+          });
+        } else {
+          console.log('잘못된 연결 암호입니다. 연결을 거부합니다.');
+          call.close();
+          alert('잘못된 연결 암호입니다.');
+        }
+      });
+    });
+
+    // --- 참여자(연결자) 부분 ---
+    let joinerStream = null;
+
+    // 마이크 사용 권한 요청 버튼
+    document.getElementById('requestMicBtn').addEventListener('click', function() {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(function(stream) {
+          joinerStream = stream;
+          document.getElementById('micStatus').innerText = '마이크 권한 획득됨';
+          console.log('마이크 권한 획득됨.');
+        })
+        .catch(function(err) {
+          console.error('마이크 접근 실패: ', err);
+          document.getElementById('micStatus').innerText = '마이크 권한 획득 실패';
+          alert('마이크 접근에 실패했습니다: ' + err);
+        });
+    });
+
+    document.getElementById('joinChannelBtn').addEventListener('click', function() {
+      let hostId = document.getElementById('hostIdInput').value.trim();
+      let password = document.getElementById('passwordInput').value.trim();
+      if (!hostId || !password) {
+        alert('호스트 Peer ID와 연결 암호를 모두 입력하세요.');
+        return;
+      }
+      if (!joinerStream) {
+        alert('먼저 "마이크 사용 권한 요청" 버튼을 눌러 마이크 권한을 획득해주세요.');
+        return;
+      }
+      // 참여자용 Peer 인스턴스 생성 (id는 자동 할당)
+      let joinerPeer = new Peer();
+      joinerPeer.on('open', function(id) {
+        console.log('참여자 Peer 생성, id: ' + id);
+        // host로 audio 스트림 전송하며 연결 암호를 metadata로 함께 전달
+        let call = joinerPeer.call(hostId, joinerStream, { metadata: { password: password } });
+        call.on('error', function(err) {
+          console.error(err);
+          document.getElementById('joinStatus').innerText = '연결 실패: ' + err;
+        });
+        call.on('stream', function(remoteStream) {
+          console.log('호스트에서 스트림 수신.');
+        });
+        document.getElementById('joinStatus').innerText = '연결 요청을 보냈습니다.';
+      });
+    });
+  </script>
+</body>
+</html>
